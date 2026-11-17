@@ -16,23 +16,30 @@ concurrent-viewer count. It runs offline in a sandbox with no network, in
 about 0.1 seconds per case, and its two runs on the same case are
 byte-identical.
 
-## Approach: launch-day shape transfer
+## Approach: ridge regression over comparable launches
 
 A launch's hour-1 print is the strongest single signal of its day-shape,
 because it measures how much of the launch had already happened by 01:00 UTC
 (a huge hour 1 means the launch peaked early; a tiny one means the unlock
-still lies ahead). The forecaster therefore:
+still lies ahead). But hour 1 can sit in a timezone trough: the launch may
+already have been bigger the day before, when the first regions unlocked.
+The forecaster therefore, for each hour, regresses log(viewers) across the
+comparable launches on two predictors:
 
-1. Takes every comparable launch in the case and computes, per hour, the
-   log-ratio of that hour's count to the launch's own hour-1 count.
-2. Weights each comparable by how close its hour-1 print is to this case's
-   (Gaussian kernel in log space, bandwidth 0.9 nats), down-weighting
-   early-access-contaminated launches (×0.5), whose day-1 curves are
-   flattened by players already in-game before launch.
-3. Anchors on this case's hour-1 print and applies the weighted empirical
-   quantiles of the log-ratios per hour, lightly smoothed across
-   neighbouring hours, so the spread is calibrated from real launch
-   dispersion rather than guessed.
+1. The log of the launch's hour-1 print — the scale anchor. Its slope is
+   shrunk toward 1, so with no evidence the model is a plain ratio transfer.
+2. The log of the launch's pre-launch 24-hour peak — the trough correction.
+   Its slope is shrunk hard toward 0: the peak helps a little, and only
+   where the data says so.
+
+Each comparable is weighted by hour-1 similarity (Gaussian kernel in log
+space, bandwidth 0.9 nats), with the bandwidth widened when the target is
+extreme so at least eight comparables stay in reach, and by how well it
+matches the target launch: same early-access contamination status, same
+unlock pattern (rolling midnight-local vs a single global unlock). The
+quantiles come from a Gaussian fit to the weighted regression residuals,
+lightly smoothed across neighbouring hours, so the spread is calibrated
+from real launch dispersion rather than guessed.
 
 It never crashes on malformed or sparse input: any failure degrades to a
 valid flat forecast, and hours with too few comparables fall back to a
@@ -46,16 +53,17 @@ Redemption 2, God of War Ragnarök, Marvel's Spider-Man 2):
 
 | case | this entry | house baseline |
 | --- | --- | --- |
-| p00 Wolverine | 0.336 | 0.744 |
-| p01 Red Dead Redemption 2 | 0.206 | 0.287 |
-| p02 God of War Ragnarök | 0.141 | 0.215 |
-| p03 Spider-Man 2 | 0.196 | 0.303 |
-| **mean** | **0.220** | **0.387** |
+| p00 Wolverine | 0.251 | 0.744 |
+| p01 Red Dead Redemption 2 | 0.175 | 0.287 |
+| p02 God of War Ragnarök | 0.125 | 0.215 |
+| p03 Spider-Man 2 | 0.194 | 0.303 |
+| **mean** | **0.186** | **0.387** |
 
-43% lower mean pinball loss than the house baseline (whose published
+52% lower mean pinball loss than the house baseline (whose published
 practice loss of ~0.387 the local scorer reproduces at 0.3871). A
 leave-one-out backtest over the 37 comparable launch curves gives a mean
-loss of 0.40 against the house baseline's 0.93 on the same targets.
+loss of 0.36 against the house baseline's 0.93 on the same targets
+(0.40 for the round-1 shape-transfer model).
 
 ## Run it
 
